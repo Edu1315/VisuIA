@@ -13,12 +13,11 @@ mongo = PyMongo(app)
 def status():
     return jsonify({"status": "ok", "uptime": "99%"})
 
-@app.route('/analisar', methods=['POST']) #integração 
+@app.route('/analisar', methods=['POST'])
 def analisar():
     if 'file' not in request.files:
         return jsonify({"error": "Nenhum arquivo enviado"}), 400
 
-    # Simulação de análise (essa função escolhe aleatoriamente um resultado e uma confiança)
     file = request.files['file']
     resultado = random.choice(["Imagem gerada por IA", "Imagem autêntica", "Manipulação detectada"])
     confianca = random.randint(70, 99)
