@@ -4,6 +4,7 @@ from bson.objectid import ObjectId
 import random, datetime
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 # Configuração MongoDB (ajuste se usar Atlas)
 app.config["MONGO_URI"] = "mongodb://localhost:27017/visuia"
@@ -30,9 +31,14 @@ def analisar():
     }
 
     inserted = mongo.db.analises.insert_one(analise)
+    
+    
     analise["id"] = str(inserted.inserted_id)
+    if "_id" in analise:
+        del analise["_id"] 
 
     return jsonify(analise)
+
 
 @app.route('/historico', methods=['GET'])
 def get_historico():
@@ -78,4 +84,6 @@ def delete_analise(id):
     return jsonify({"message": "Análise removida com sucesso"})
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    from waitress import serve
+    print("Servidor rodando com Waitress em http://127.0.0.1:5000" )
+    serve(app, host='127.0.0.1', port=5000)

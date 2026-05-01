@@ -3,14 +3,14 @@ import requests
 import json
 import pandas as pd
 
-# URL base do seu backend Flask
+# URL base do backend Flask
 FLASK_BASE_URL = "http://127.0.0.1:5000"
 
 st.set_page_config(page_title="Detector de IA em Imagens", layout="centered" )
 st.title("Detector de Imagens Geradas por IA")
 st.markdown("Faça o upload de uma imagem para verificar se ela foi gerada ou alterada por Inteligência Artificial.")
 
-# Função para Upload e Análise de Imagem
+# Função para Upload e análise de imagem
 def upload_image():
     st.header("Upload de Imagem")
     uploaded_file = st.file_uploader("Escolha uma imagem...", type=["png", "jpg", "jpeg"])
@@ -58,7 +58,7 @@ def display_historico():
                     with col2:
                         if st.button(f"Excluir", key=f"delete_{row['ID']}"):
                             delete_analise(row['ID'])
-                            st.experimental_rerun() # Recarrega a página para atualizar o histórico
+                            st.rerun() # Recarrega a página para atualizar o histórico
         else:
             st.error(f"Erro ao carregar histórico: {response.json().get('error', 'Erro desconhecido')}")
     except requests.exceptions.ConnectionError:
