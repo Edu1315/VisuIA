@@ -2,12 +2,18 @@ from flask import Flask, request, jsonify
 from flask_pymongo import PyMongo
 from bson.objectid import ObjectId
 import random, datetime
+import os
+from dotenv import load_dotenv
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
-# Configuração MongoDB (ajuste se usar Atlas)
-app.config["MONGO_URI"] = "mongodb://localhost:27017/visuia"
+# Carregar variáveis do .env
+load_dotenv()
+mongo_uri = os.getenv("MONGO_URI")
+
+# Configuração MongoDB Atlas
+app.config["MONGO_URI"] = mongo_uri
 mongo = PyMongo(app)
 
 @app.route('/status', methods=['GET'])
@@ -27,36 +33,27 @@ def analisar():
         "arquivo": file.filename,
         "resultado": resultado,
         "confianca": confianca,
-        "data": datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+        "data": datetime.datetime.now()
     }
 
-    inserted = mongo.db.analises.insert_one(analise)
-    
-    
+    inserted = mongo.db.imagens.insert_one(analise)
     analise["id"] = str(inserted.inserted_id)
-    if "_id" in analise:
-        del analise["_id"] 
+    analise.pop("_id", None)
 
     return jsonify(analise)
-
 
 @app.route('/historico', methods=['GET'])
 def get_historico():
     analises = []
-    for a in mongo.db.analises.find():
-        analises.append({
-            "id": str(a["_id"]),
-            "arquivo": a["arquivo"],
-            "resultado": a["resultado"],
-            "confianca": a["confianca"],
-            "data": a["data"]
-        })
+    for a in mongo.db.imagens.find():
+        a["id"] = str(a.pop("_id"))  # Converte o ID de objeto para texto
+        analises.append(a)
     return jsonify(analises)
 
 @app.route('/historico/<id>', methods=['GET'])
 def get_analise(id):
     try:
-        a = mongo.db.analises.find_one({"_id": ObjectId(id)})
+        a = mongo.db.imagens.find_one({"_id": ObjectId(id)})
     except:
         return jsonify({"error": "ID inválido"}), 400
 
@@ -74,7 +71,7 @@ def get_analise(id):
 @app.route('/historico/<id>', methods=['DELETE'])
 def delete_analise(id):
     try:
-        result = mongo.db.analises.delete_one({"_id": ObjectId(id)})
+        result = mongo.db.imagens.delete_one({"_id": ObjectId(id)})
     except:
         return jsonify({"error": "ID inválido"}), 400
 
@@ -85,5 +82,5 @@ def delete_analise(id):
 
 if __name__ == '__main__':
     from waitress import serve
-    print("Servidor rodando com Waitress em http://127.0.0.1:5000" )
+    print("Servidor rodando com Waitress em http://127.0.0.1:5000")
     serve(app, host='127.0.0.1', port=5000)

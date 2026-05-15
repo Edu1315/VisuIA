@@ -16,7 +16,7 @@ def upload_image():
     uploaded_file = st.file_uploader("Escolha uma imagem...", type=["png", "jpg", "jpeg"])
 
     if uploaded_file is not None:
-        st.image(uploaded_file, caption="Imagem Carregada", use_column_width=True)
+        st.image(uploaded_file, caption="Imagem Carregada", use_container_width=True)
         st.write("Analisando imagem...")
 
         files = {"file": uploaded_file.getvalue()}
