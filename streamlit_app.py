@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import json
 import pandas as pd
+import time
 
 # URL base do backend Flask
 FLASK_BASE_URL = "http://127.0.0.1:5000"
@@ -13,28 +14,42 @@ st.markdown("Faça o upload de uma imagem para verificar se ela foi gerada ou al
 # Função para Upload e análise de imagem
 def upload_image():
     st.header("Upload de Imagem")
-    uploaded_file = st.file_uploader("Escolha uma imagem...", type=["png", "jpg", "jpeg"])
+    
+    # Agora aceita múltiplos arquivos
+    uploaded_files = st.file_uploader(
+        "Escolha uma ou mais imagens...", 
+        type=["png", "jpg", "jpeg"],
+        accept_multiple_files=True 
+    )
 
-    if uploaded_file is not None:
-        st.image(uploaded_file, caption="Imagem Carregada", use_container_width=True)
-        st.write("Analisando imagem...")
-
-        files = {"file": uploaded_file.getvalue()}
-        try:
-            response = requests.post(f"{FLASK_BASE_URL}/analisar", files=files) #integrção com o backend
-            if response.status_code == 200:
-                result = response.json()
-                st.success("Análise Concluída!")
-                st.write(f"**Arquivo:** {result['arquivo']}")
-                st.write(f"**Resultado:** {result['resultado']}")
-                st.write(f"**Confiança:** {result['confianca']}%")
-                st.write(f"**Data:** {result['data']}")
-            else:
-                st.error(f"Erro na análise: {response.json().get('error', 'Erro desconhecido')}")
-        except requests.exceptions.ConnectionError:
-            st.error("Não foi possível conectar ao servidor Flask. Certifique-se de que o backend está em execução.")
-        except Exception as e:
-            st.error(f"Ocorreu um erro inesperado: {e}")
+    if uploaded_files:
+        st.write(f"{len(uploaded_files)} imagem(ns) selecionada(s).")     
+        
+        # Botão novo (Paralelismo)
+        if len(uploaded_files) >= 1:
+            if st.button("Executar Análise"):
+                st.write("Iniciando processamento paralelo...")
+                start_time = time.time()
+                
+                # Prepara o lote de arquivos
+                files_to_send = [('imagens', (f.name, f.getvalue())) for f in uploaded_files]
+                
+                try:
+                    response = requests.post(f"{FLASK_BASE_URL}/analisar_lote", files=files_to_send)
+                    
+                    if response.status_code == 200:
+                        duracao = time.time() - start_time
+                        resultados = response.json()
+                        
+                        st.success(f"Concluído em {duracao:.2f} segundos!")
+                        for r in resultados:
+                            st.write(f"✅ {r}")
+                        
+                        st.info(f"Explicação: Se fosse sem paralelismo, levaria o dobro do tempo!")
+                    else:
+                        st.error("Erro no servidor ao processar lote.")
+                except Exception as e:
+                    st.error(f"Erro: {e}")
 
 # Função para Exibir Histórico de Análises
 def display_historico():

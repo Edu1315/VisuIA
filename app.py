@@ -1,3 +1,14 @@
+import os
+from concurrent.futures import ProcessPoolExecutor
+
+executor = ProcessPoolExecutor(max_workers=os.cpu_count())
+
+def realizar_calculo_ia(arquivo):
+    import time
+    time.sleep(1) # Cada imagem "demora" 1 segundo
+    import random
+    return random.choice(["IA", "Autêntica"])
+
 from flask import Flask, request, jsonify
 from flask_pymongo import PyMongo
 from bson.objectid import ObjectId
@@ -49,6 +60,19 @@ def get_historico():
         a["id"] = str(a.pop("_id"))  # Converte o ID de objeto para texto
         analises.append(a)
     return jsonify(analises)
+
+@app.route('/analisar_lote', methods=['POST'])
+def analisar_lote():
+    # Pega várias imagens enviadas de uma vez
+    arquivos = request.files.getlist('imagens')
+    resultados = list(executor.map(realizar_calculo_ia, arquivos))
+    
+    return jsonify({
+        "status": "sucesso",
+        "metodo": "Paralelismo (Multiprocessing)",
+        "quantidade": len(resultados),
+        "detalhes": resultados
+    })
 
 @app.route('/historico/<id>', methods=['GET'])
 def get_analise(id):
