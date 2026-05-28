@@ -1,5 +1,16 @@
-.env
+# Ambiente virtual
 .venv/
-.venv-1/
+
+# Variáveis de ambiente
+.env
+
+# Cache Python
 __pycache__/
 *.pyc
+*.pyo
+
+# Sistema operacional
+desktop.ini
+
+# Arquivos temporários
+*.log
