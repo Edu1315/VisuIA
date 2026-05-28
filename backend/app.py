@@ -10,22 +10,14 @@ def realizar_calculo_ia(arquivo):
     return random.choice(["IA", "Autêntica"])
 
 from flask import Flask, request, jsonify
-from flask_pymongo import PyMongo
+from database.mongo import mongo, init_db
 from bson.objectid import ObjectId
 import random, datetime
 import os
-from dotenv import load_dotenv
 
 app = Flask(__name__)
+init_db(app)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
-
-# Carregar variáveis do .env
-load_dotenv()
-mongo_uri = os.getenv("MONGO_URI")
-
-# Configuração MongoDB Atlas
-app.config["MONGO_URI"] = mongo_uri
-mongo = PyMongo(app)
 
 @app.route('/status', methods=['GET'])
 def status():
