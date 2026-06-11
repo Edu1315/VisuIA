@@ -1,18 +1,27 @@
 # Ambiente virtual
 venv/
-
-# Variáveis de ambiente
 .env
 
 # Cache Python
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+
+# Logs e temporários
+*.log
+*.tmp
 
 # Sistema operacional
 desktop.ini
+.DS_Store
+Thumbs.db
 
-# Arquivos temporários
-*.log
-/model/
+# Modelos e uploads
+model/
 uploads/
+
+# Arquivos grandes de treino
+*.h5
+*.pb
+*.ckpt
