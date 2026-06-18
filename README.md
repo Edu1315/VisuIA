@@ -4,7 +4,7 @@
 
 O VisuIA é uma aplicação web desenvolvida para identificar a probabilidade de uma imagem ter sido gerada por Inteligência Artificial.
 
-A solução utiliza um modelo de Deep Learning baseado na arquitetura MobileNetV2 para analisar imagens enviadas pelos usuários, retornando o resultado da classificação juntamente com o nível de confiança da predição.
+A solução utiliza um modelo de Deep Learning baseado na arquitetura MobileNetV2 e Hugging Face Detector para analisar imagens enviadas pelos usuários, retornando o resultado da classificação juntamente com o nível de confiança da predição.
 
 O sistema é composto por um frontend desenvolvido em Streamlit, uma API REST construída com Flask, um modelo de Inteligência Artificial treinado em TensorFlow/Keras e um banco de dados MongoDB Atlas para armazenamento do histórico das análises.
 
@@ -35,6 +35,7 @@ Além disso, o sistema mantém um histórico das análises realizadas para consu
 * TensorFlow
 * Keras
 * MobileNetV2
+* Hugging Face Detector
 
 ### Banco de Dados
 
