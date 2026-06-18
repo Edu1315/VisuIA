@@ -1,3 +1,4 @@
+
 import os
 import uuid
 import traceback
@@ -8,140 +9,204 @@ from bson.objectid import ObjectId
 import datetime
 from dotenv import load_dotenv
 
-import os
-# reduzir logs do TensorFlow: 0=DEBUG, 1=INFO, 2=WARNING, 3=ERROR
+# Redução de logs do TensorFlow: 0=DEBUG, 1=INFO, 2=WARNING, 3=ERROR
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-# desliga otimizações oneDNN se quiser resultados numéricos consistentes
+# Desliga otimizações oneDNN (Reduz incompatibilidade)
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
 import tensorflow as tf
-
-
-
 from PIL import Image
 import numpy as np
-import tensorflow as tf 
 
+from transformers import pipeline
 
+# Inicializando Hugging Face detector 
+try:
+    hf_detector1 = pipeline("image-classification", model="capcheck/ai-image-detection")
+    hf_detector2 = pipeline("image-classification", model="umm-maybe/AI-image-detector")
+    print("HF detector carregado com sucesso")
+except Exception as e:
+    hf_detector = None
+    print("Falha ao carregar HF detector:", e)
+
+# Carrega variáveis de ambiente
 load_dotenv()
 
 app = Flask(__name__)
 init_db(app)
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 #Tamanho maximo 16mb
 
-# pasta de uploads temporários
+# Pasta de uploads temporários
 BASE_DIR = os.path.dirname(__file__)
 UPLOAD_DIR = os.path.join(BASE_DIR, "..", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# carregar modelo (caminho absoluto e checagem)
+# Carregar modelo local caso HF esteja indisponivel
 MODEL_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "model", "mobilenet_v2.h5"))
-model = tf.keras.models.load_model(MODEL_PATH)
-
-
-if not os.path.exists(MODEL_PATH):
-    raise FileNotFoundError(f"Modelo não encontrado em: {MODEL_PATH}")
-
 try:
     model = tf.keras.models.load_model(MODEL_PATH)
     print("Modelo carregado com sucesso:", MODEL_PATH)
 except Exception as e:
-    raise RuntimeError(f"Erro ao carregar o modelo: {e}")
+    model = None
+    print("Falha ao carregar modelo local:", e)
 
-# executor de threads
+# Executor de threads (Paralelismo)
 MAX_WORKERS = 4
 executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
 
+# Formata o documento do mongo para o front
 def serialize_for_front(doc):
-    """
-    Retorna dicionário com os campos que o front espera:
-    id, arquivo, resultado, confianca, data
-    Mantém também 'result' (novo formato) e 'error' para debug.
-    """
     out = {}
     out["id"] = str(doc.get("_id") or doc.get("id") or "")
     out["arquivo"] = doc.get("filename") or doc.get("arquivo") or ""
-    # resultado textual (compatibilidade): prioriza label antigo, senão usa ai_prob interpretado
+
+    # Resultado textual (compatibilidade)
     if "resultado" in doc and doc.get("resultado") is not None:
         out["resultado"] = doc.get("resultado")
     else:
-        # tenta derivar de result.ai_prob
-        r = doc.get("result", {})
-        ai = r.get("ai_prob") if isinstance(r, dict) else None
+        r = doc.get("result", {}) if isinstance(doc.get("result", {}), dict) else {}
+        ai = r.get("ai_prob")
         if ai is None:
-            out["resultado"] = "—"
+            out["resultado"] = "Indeterminado"
         else:
-            out["resultado"] = "Imagem gerada por IA" if ai >= 0.5 else "Imagem autêntica"
-    # confianca numérica (0..100) — prioriza campo legado 'confianca' se existir
+            pct = round(float(ai) * 100, 2)
+            out["resultado"] = f"A imagem tem {pct}% de chance de ser IA"
+
+
+    # Confianca numérica (0..100) para exibição
     if "confianca" in doc and doc.get("confianca") is not None:
         try:
             out["confianca"] = float(doc.get("confianca"))
         except Exception:
             out["confianca"] = None
     else:
-        r = doc.get("result", {})
-        conf = r.get("confidence") if isinstance(r, dict) else None
+        r = doc.get("result", {}) if isinstance(doc.get("result", {}), dict) else {}
+        conf = r.get("confidence")
         out["confianca"] = round(float(conf) * 100, 2) if conf is not None else None
-    # data em ISO legível
+
+    # data em ISO legível (data de dia não de dados)
     created = doc.get("created_at") or doc.get("data")
     if hasattr(created, "isoformat"):
         out["data"] = created.isoformat()
     else:
         out["data"] = created
-    # manter payload novo para frontend avançado
+
+  
     out["result"] = doc.get("result")
     out["error"] = doc.get("error")
     return out
 
-
-# substitua a função inferir_caminho por esta
+# Recebe o caminho do arquivo e retorna padronizado
 def inferir_caminho(caminho):
     """
     Retorna dicionário padronizado:
-    { "arquivo": nome, "result": {"ai_prob":0..1,"confidence":0..1,"raw":{...}}, "erro": None }
+    { "arquivo": nome, "result": {"ai_prob":0..1 or None,"confidence":0..1 or None,"raw":{...}}, "erro": None ou mensagem }
     """
+    import os
+    import traceback
+    from PIL import Image
+    import numpy as np
+
+    # Extrai o nome original da imagem (retira o ID do resultado no front)
+    nome_original = None
     try:
+
+        try:
+            nome_original = os.path.basename(caminho).split("_", 1)[1]
+        except Exception:
+            nome_original = os.path.basename(caminho) or "arquivo-desconhecido"
+
+        # Pré-processa a imagem 
         img = Image.open(caminho).convert("RGB").resize((224, 224))
         arr = np.array(img) / 255.0
-        # não expanda aqui se a função inferir_imagem espera shape (224,224,3)
         inp = np.expand_dims(arr, axis=0)
-        preds = model.predict(inp)
 
-        # ajuste conforme saída do seu modelo:
-        # caso binário com saída shape (1,1)
-        if preds.ndim == 2 and preds.shape[-1] == 1:
-            ai_prob = float(preds[0][0])
-            confidence = ai_prob
+        # Variaveis de Saida
+        ai_prob = None
+        confidence = None
+        raw_out = None
+
+        # Detectores
+        try:
+            if hf_detector1 and hf_detector2:
+                res1 = hf_detector1(caminho)
+                res2 = hf_detector2(caminho)
+                print("DEBUG: res1:", res1)
+                print("DEBUG: res2:", res2)
+
+                # Seleciona a predição com maior score de cada detector
+                top1 = max(res1, key=lambda x: x["score"])
+                top2 = max(res2, key=lambda x: x["score"])
+
+                label1, score1 = top1["label"].lower(), float(top1["score"])
+                label2, score2 = top2["label"].lower(), float(top2["score"])
+
+                # Decisão ensemble (concordância entre detectores define ai_prob)
+                if ("fake" in label1 or "artificial" in label1) and ("fake" in label2 or "artificial" in label2):
+                    ai_prob = max(score1, score2)
+                    confidence = max(score1, score2)
+                elif ("real" in label1 or "human" in label1) and ("real" in label2 or "human" in label2):
+                    ai_prob = min(1.0 - score1, 1.0 - score2)
+                    confidence = max(score1, score2)
+                else:
+                    ai_prob = None
+                    confidence = None
+
+                raw_out = {"hf_result1": res1, "hf_result2": res2}
+        except Exception as e:
+            traceback.print_exc()
+            arquivo_fallback = nome_original or (os.path.basename(caminho) if caminho else "arquivo-desconhecido")
+            return {
+                "aexcept Exception rquivo": arquivo_fallback,
+                "resultado": "Indeterminado",
+                "result": {"ai_prob": None, "confidence": None, "raw": None},
+                "erro": str(e)
+            }
+
+
+        # Garante limites para ai_prob e confidence
+        if ai_prob is not None:
+            ai_prob = max(0.0, min(1.0, float(ai_prob)))
+        if confidence is not None:
+            confidence = max(0.0, min(1.0, float(confidence)))
+
+        # Interpretação dos resultados
+        if ai_prob is None:
+            resultado_texto = "Indeterminado"
         else:
-            # se for vetor de probabilidades, tente assumir classe 0 = IA
-            try:
-                ai_prob = float(preds[0][0])
-                confidence = max(preds[0]).item()
-            except Exception:
-                ai_prob = 0.0
-                confidence = 0.0
-
-        # garantir limites
-        ai_prob = max(0.0, min(1.0, ai_prob))
-        confidence = max(0.0, min(1.0, confidence))
+            pct = round(ai_prob * 100, 2)
+            if ai_prob >= 0.80:
+                resultado_texto = f"A imagem tem {pct}% de chance de ser IA (provavelmente IA)"
+            elif ai_prob <= 0.20:
+                resultado_texto = f"A imagem tem {pct}% de chance de ser IA (provavelmente real)"
+            else:
+                resultado_texto = "Indeterminado"
 
         return {
-            "arquivo": os.path.basename(caminho),
-            "result": {"ai_prob": ai_prob, "confidence": confidence, "raw": {"model_output": preds.tolist()}},
+            "arquivo": nome_original,
+            "resultado": resultado_texto,
+            "result": {"ai_prob": ai_prob, "confidence": confidence, "raw": raw_out},
             "erro": None
         }
+
     except Exception as e:
+        traceback.print_exc()
+        arquivo_fallback = nome_original or (os.path.basename(caminho) if caminho else "arquivo-desconhecido")
         return {
-            "arquivo": os.path.basename(caminho),
+            "arquivo": arquivo_fallback,
+            "resultado": "Indeterminado",
             "result": {"ai_prob": None, "confidence": None, "raw": None},
             "erro": str(e)
         }
 
 
+
+# Checar a "saude" do serviço
 @app.route('/status', methods=['GET'])
 def status():
     return jsonify({"status": "ok", "uptime": "99%"})
 
+# Rota para analisar uma única imagem
 @app.route('/analisar', methods=['POST'])
 def analisar():
     if 'file' not in request.files:
@@ -157,24 +222,22 @@ def analisar():
         result = infer.get("result", {"ai_prob": None, "confidence": None, "raw": None})
         erro = infer.get("erro")
 
-        # calcular probabilidade de autenticidade (0..1) a partir de ai_prob
+        # calcular probabilidade de ser IA (0..1) a partir de ai_prob
         ai_prob = result.get("ai_prob")
-        auth_prob = None if ai_prob is None else max(0.0, min(1.0, 1.0 - float(ai_prob)))
-        confidence = result.get("confidence")
-        confidence_pct = None if confidence is None else round(float(confidence) * 100, 2)
+        chance_ia_pct = None if ai_prob is None else round(float(ai_prob) * 100, 2)
 
-        # documento salvo no Mongo: inclui campos legados e novo 'result'
+        # documento salvo no Mongo
         doc = {
             "filename": infer.get("arquivo", file.filename),
-            "arquivo": infer.get("arquivo", file.filename),   # legado
-            # armazenar a probabilidade de autenticidade como string legada
-            "resultado": f"{round(auth_prob * 100, 2)}%" if auth_prob is not None else None,
-            "confianca": confidence_pct,
+            "arquivo": infer.get("arquivo", file.filename),   
+            # armazenar a probabilidade de ser IA 
+            "resultado": f"A imagem tem {chance_ia_pct}% de chance de ser IA" if chance_ia_pct is not None else None,
             "result": result,
             "error": erro,
             "created_at": datetime.datetime.utcnow()
         }
-        inserted = mongo.db.imagens.insert_one(doc)  # **coleção: imagens**
+
+        inserted = mongo.db.imagens.insert_one(doc)  # *coleção: imagens*
         doc["_id"] = inserted.inserted_id
 
         resp = serialize_for_front(doc)
@@ -183,7 +246,8 @@ def analisar():
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-
+    
+    # Remove arquivo temporário após processamento
     finally:
         try:
             if os.path.exists(caminho):
@@ -193,13 +257,14 @@ def analisar():
 
 
 
-
+# Rota para analisar múltiplas imagens em lote
 @app.route('/analisar_lote', methods=['POST'])
 def analisar_lote():
     arquivos = request.files.getlist('imagens')
     if not arquivos:
         return jsonify({"status": "erro", "mensagem": "Nenhuma imagem enviada"}), 400
-
+    
+    # Salva cada upload temporariamente e registra caminho original
     caminhos = []
     for arq in arquivos:
         nome_unico = f"{uuid.uuid4().hex}_{arq.filename}"
@@ -207,14 +272,16 @@ def analisar_lote():
         arq.save(caminho)
         caminhos.append((caminho, arq.filename))
 
-    # submeter tarefas e mapear future -> nome original
+    
     future_to_name = {}
     for caminho, original_name in caminhos:
+        # Submete cada arquivo para o executor processar de forma paralela
         f = executor.submit(inferir_caminho, caminho)
         future_to_name[f] = (caminho, original_name)
 
     resultados = []
     try:
+        # Coleta resultados conforme as threads terminam
         for f in as_completed(list(future_to_name.keys())):
             caminho, original_name = future_to_name[f]
             try:
@@ -233,20 +300,24 @@ def analisar_lote():
                 continue
 
             result = res.get("result", {"ai_prob": None, "confidence": None, "raw": None})
+
             ai_prob = result.get("ai_prob")
-            auth_prob = None if ai_prob is None else max(0.0, min(1.0, 1.0 - float(ai_prob)))
+            chance_ia_pct = None if ai_prob is None else round(float(ai_prob) * 100, 2)
             confidence = result.get("confidence")
             confidence_pct = None if confidence is None else round(float(confidence) * 100, 2)
 
             doc = {
                 "filename": res.get("arquivo", original_name),
                 "arquivo": res.get("arquivo", original_name),
-                "resultado": f"{round(auth_prob * 100, 2)}%" if auth_prob is not None else None,
+                "resultado": f"A imagem tem {chance_ia_pct}% de chance de ser IA" if chance_ia_pct is not None else None,
                 "confianca": confidence_pct,
                 "result": result,
                 "error": res.get("erro"),
-                "created_at": datetime.datetime.utcnow()
+                # salvar created_at com timezone UTC
+                "created_at": datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
             }
+
+            # Insere cada análise no Mongo
             inserted = mongo.db.imagens.insert_one(doc)
             doc["_id"] = inserted.inserted_id
             resultados.append(serialize_for_front(doc))
@@ -254,7 +325,7 @@ def analisar_lote():
     except Exception:
         resultados.append({"filename": None, "result": {"ai_prob": None, "confidence": None}, "error": traceback.format_exc()})
     finally:
-        # limpar arquivos temporários
+        # limpa todos os arquivos temporários
         for c, _ in caminhos:
             try:
                 os.remove(c)
@@ -270,6 +341,7 @@ def analisar_lote():
 def get_historico():
     try:
         docs = []
+        # Retorna histórico de análises (últimos 100)
         for a in mongo.db.imagens.find().sort("created_at", -1).limit(100):
             docs.append(serialize_for_front(a))
         return jsonify(docs), 200

@@ -25,3 +25,5 @@ uploads/
 *.h5
 *.pb
 *.ckpt
+
+debug_examples/
